@@ -1,0 +1,1979 @@
+{
+  "name": "Appointment Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": " text/html; charset=utf-8"
+              },
+              {
+                "name": "Set-Cookie",
+                "value": "={{ 'sessionId=' + $('Get/Create Session ID').first().json.sessionId + '; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax' }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -656,
+        -144
+      ],
+      "id": "fc2f32b8-cb73-4d9d-b62e-7df4e25625f7",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "html": "\n<!DOCTYPE html>\n<html>\n<head>\n  <title>{{ $('Form Configuration').item.json.Title }}</title>\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\n  <script src=\"https://cdn.jsdelivr.net/npm/marked/marked.min.js\"></script>\n  <script src=\"https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js\"></script>\n\n  {{ $('Style').item.json.html }}\n</head>\n\n<body>\n\n  <div class=\"chat-container\">\n\n    <!-- Header -->\n    <header class=\"header\">\n      <div class=\"header-avatar\">\n        <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"\n             stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n          <path d=\"M8 3v3M16 3v3M4 9h16\"/>\n          <rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"3\"/>\n          <path d=\"m9 15 2 2 4-4\"/>\n        </svg>\n      </div>\n\n      <div class=\"header-info\">\n        <div class=\"header-title\">Appointment Assistant</div>\n        <div class=\"header-subtitle\">\n          <span class=\"online-dot\"></span>\n          Here to help you\n        </div>\n      </div>\n\n      <div class=\"header-badge\">AI ASSISTANT</div>\n    </header>\n\n    <!-- Conversation -->\n    <main id=\"messages\" aria-live=\"polite\" aria-label=\"Conversation\">\n    </main>\n\n    <!-- Input -->\n    <footer class=\"input-area\">\n      <div class=\"input-wrapper\">\n        <textarea\n          id=\"messageInput\"\n          placeholder=\"Type your message...\"\n          aria-label=\"Type your message\"\n          autocomplete=\"off\"\n          rows=\"1\"\n        ></textarea>\n\n        <button id=\"sendButton\" type=\"button\" onclick=\"sendMessage()\">\n          <span>Send</span>\n          <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"\n               stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n            <path d=\"M5 12h14M12 5l7 7-7 7\"/>\n          </svg>\n        </button>\n      </div>\n\n      <div class=\"input-hint\">\n        Powered by AI Appointment Assistant\n      </div>\n    </footer>\n\n  </div>\n\n  {{ $('Script').item.json.html }}\n\n</body>\n</html>\n"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        -144
+      ],
+      "id": "23ad8f4a-9cc5-445f-ab5f-a7651ad2cf1b",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eb90800e-3fba-4f93-9058-3b663d6d92b1",
+              "name": "Title",
+              "type": "string",
+              "value": "Appointment Assistant"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b597803d-4cf9-4dc9-b7cf-2cb4cf501c05",
+      "name": "Form Configuration",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -1776,
+        -144
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "html": "<script>\n  const sessionId = \"{{ $('Get/Create Session ID').item.json.sessionId }}\";\n  const messageInput = document.getElementById(\"messageInput\");\n  const messagesContainer = document.getElementById(\"messages\");\n  const sendButton = document.getElementById(\"sendButton\");\n\n  let oldestMessageId = null;\n  let hasMoreMessages = false;\n\n  let loadingOlder = false;\n  let olderLoadArmed = true;\n\n  // --------------------------------------------------\n  // SEND MESSAGE\n  // --------------------------------------------------\n\n  async function sendMessage() {\n    const text = messageInput.value.trim();\n\n    if (!text || sendButton.disabled) return;\n\n    addMessage(text, \"user\");\n\n    messageInput.value = \"\";\n    messageInput.style.height = \"auto\";\n\n    sendButton.disabled = true;\n\n    const assistantMessage = addTypingIndicator();\n    let receivedContent = false;\n\n    try {\n      const response = await fetch(\"/webhook/appointment-chat-api\", {\n        method: \"POST\",\n        headers: {\n          \"Content-Type\": \"application/json\"\n        },\n        body: JSON.stringify({\n          session_id: sessionId,\n          message: text\n        })\n      });\n\n      if (!response.ok) {\n        throw new Error(\"Request failed: \" + response.status);\n      }\n\n      if (!response.body) {\n        throw new Error(\"Streaming response not supported\");\n      }\n\n      const reader = response.body.getReader();\n      const decoder = new TextDecoder();\n\n      let buffer = \"\";\n\n      while (true) {\n        const { value, done } = await reader.read();\n\n        if (done) break;\n\n        buffer += decoder.decode(value, { stream: true });\n\n        const lines = buffer.split(\"\\n\");\n        buffer = lines.pop();\n\n        for (const line of lines) {\n          receivedContent = processStreamEvent(\n            line,\n            assistantMessage,\n            receivedContent\n          );\n        }\n      }\n\n      buffer += decoder.decode();\n\n      if (buffer.trim()) {\n        receivedContent = processStreamEvent(\n          buffer,\n          assistantMessage,\n          receivedContent\n        );\n      }\n\n      if (!receivedContent) {\n        assistantMessage.textContent = \"No response received.\";\n      }\n\n    } catch (error) {\n      assistantMessage.textContent = \"Sorry, something went wrong.\";\n      console.error(\"Send message error:\", error);\n\n    } finally {\n      sendButton.disabled = false;\n      messageInput.focus();\n    }\n  }\n\n\n  // --------------------------------------------------\n  // LOAD INITIAL HISTORY\n  // --------------------------------------------------\n\n  async function loadHistory() {\n    sendButton.disabled = true;\n\n    const loader = addTypingIndicator(\"Loading conversation\");\n\n    try {\n      const response = await fetch(\n        `/webhook/appointment-chat-history?session_id=${encodeURIComponent(sessionId)}`\n      );\n\n      if (!response.ok) {\n        throw new Error(\"Failed to load chat history: \" + response.status);\n      }\n\n      const data = await response.json();\n      const history = Array.isArray(data) ? data[0] : data;\n\n      oldestMessageId = history.oldestId;\n      hasMoreMessages = history.hasMore;\n\n      // Initial history is appended in API order.\n      history.messages.forEach(msg => {\n        if (msg.human !== undefined) {\n          addMessage(msg.human, \"user\");\n        } else if (msg.ai !== undefined) {\n          const element = addMessage(\"\", \"assistant\");\n          renderMarkdown(element, msg.ai);\n        }\n      });\n\n    } catch (error) {\n      console.error(\"History loading error:\", error);\n\n    } finally {\n      loader.remove();\n\n      messagesContainer.scrollTop = messagesContainer.scrollHeight;\n\n      sendButton.disabled = false;\n    }\n  }\n\n\n  // --------------------------------------------------\n  // LOAD OLDER HISTORY\n  // --------------------------------------------------\n\n  async function loadOlderMessages() {\n    if (\n      loadingOlder ||\n      !hasMoreMessages ||\n      !oldestMessageId\n    ) {\n      return;\n    }\n\n    loadingOlder = true;\n\n    const requestedBeforeId = oldestMessageId;\n\n    // Capture the first existing message as a scroll anchor.\n    const anchor = messagesContainer.firstElementChild;\n\n    const previousAnchorTop = anchor\n      ? anchor.getBoundingClientRect().top\n      : null;\n\n    const previousHeight = messagesContainer.scrollHeight;\n\n    try {\n      const response = await fetch(\n        `/webhook/appointment-chat-history-older?session_id=${encodeURIComponent(sessionId)}&before_id=${encodeURIComponent(requestedBeforeId)}`\n      );\n\n      if (!response.ok) {\n        throw new Error(\n          \"Failed to load older messages: \" + response.status\n        );\n      }\n\n      const data = await response.json();\n      const history = Array.isArray(data) ? data[0] : data;\n\n      if (!history || !Array.isArray(history.messages)) {\n        throw new Error(\"Invalid older history response\");\n      }\n\n      // Build the entire batch without modifying the DOM.\n      const fragment = document.createDocumentFragment();\n\n      // IMPORTANT:\n      // Preserve the order returned by the API.\n      history.messages.forEach(msg => {\n        let element;\n\n        if (msg.human !== undefined) {\n          element = createMessage(msg.human, \"user\");\n\n        } else if (msg.ai !== undefined) {\n          element = createMessage(\"\", \"assistant\");\n          renderMarkdown(element, msg.ai);\n        }\n\n        if (element) {\n          fragment.appendChild(element);\n        }\n      });\n\n      // Insert the entire batch at once.\n      messagesContainer.prepend(fragment);\n\n      oldestMessageId = history.oldestId;\n      hasMoreMessages = history.hasMore;\n\n      // Wait for layout to update.\n      await new Promise(resolve => {\n        requestAnimationFrame(resolve);\n      });\n\n      // Restore the exact position of the previous first message.\n      if (anchor && anchor.isConnected) {\n        const newAnchorTop = anchor.getBoundingClientRect().top;\n\n        messagesContainer.scrollTop +=\n          newAnchorTop - previousAnchorTop;\n\n      } else {\n        // Fallback when there was no previous message.\n        messagesContainer.scrollTop =\n          messagesContainer.scrollHeight - previousHeight;\n      }\n\n    } catch (error) {\n      console.error(\"Older history loading error:\", error);\n\n      // Allow retry after a failed request.\n      olderLoadArmed = true;\n\n    } finally {\n      loadingOlder = false;\n    }\n  }\n\n\n  // --------------------------------------------------\n  // MESSAGE ELEMENTS\n  // --------------------------------------------------\n\n  function createMessage(text, sender) {\n    const message = document.createElement(\"div\");\n\n    message.className = \"message \" + sender;\n    message.textContent = text;\n\n    return message;\n  }\n\n\n  function addMessage(text, sender) {\n    const message = createMessage(text, sender);\n\n    messagesContainer.appendChild(message);\n    messagesContainer.scrollTop = messagesContainer.scrollHeight;\n\n    return message;\n  }\n\n\n  function addTypingIndicator(label = \"\") {\n    const message = document.createElement(\"div\");\n\n    message.className = \"message assistant typing-indicator\";\n\n    if (label) {\n      const text = document.createElement(\"span\");\n\n      text.className = \"loading-text\";\n      text.textContent = label;\n\n      message.appendChild(text);\n    }\n\n    for (let i = 0; i < 3; i++) {\n      const dot = document.createElement(\"span\");\n      message.appendChild(dot);\n    }\n\n    messagesContainer.appendChild(message);\n    messagesContainer.scrollTop = messagesContainer.scrollHeight;\n\n    return message;\n  }\n\n\n  // --------------------------------------------------\n  // STREAMING RESPONSE\n  // --------------------------------------------------\n\n  function processStreamEvent(line, messageElement, receivedContent) {\n    if (!line.trim()) return receivedContent;\n\n    try {\n      const event = JSON.parse(line);\n\n      if (\n        event.type === \"item\" &&\n        typeof event.content === \"string\"\n      ) {\n\n        if (!receivedContent) {\n          messageElement.classList.remove(\"typing-indicator\");\n          messageElement.replaceChildren();\n\n          receivedContent = true;\n        }\n\n        messageElement.dataset.rawContent =\n          (messageElement.dataset.rawContent || \"\") + event.content;\n\n        renderMarkdown(\n          messageElement,\n          messageElement.dataset.rawContent\n        );\n\n        const isNearBottom =\n          messagesContainer.scrollHeight -\n          messagesContainer.scrollTop -\n          messagesContainer.clientHeight < 100;\n\n        if (isNearBottom) {\n          messagesContainer.scrollTop =\n            messagesContainer.scrollHeight;\n        }\n      }\n\n    } catch (error) {\n      console.warn(\"Could not parse stream event:\", line);\n    }\n\n    return receivedContent;\n  }\n\n\n  // --------------------------------------------------\n  // MARKDOWN\n  // --------------------------------------------------\n\n  function renderMarkdown(element, content) {\n    const html = marked.parse(content);\n\n    element.innerHTML = DOMPurify.sanitize(html);\n  }\n\n\n  // --------------------------------------------------\n  // SCROLL HANDLING\n  // --------------------------------------------------\n\n  messagesContainer.addEventListener(\"scroll\", () => {\n\n    // Rearm only after the user moves away from the top.\n    if (messagesContainer.scrollTop > 150) {\n      olderLoadArmed = true;\n      return;\n    }\n\n    // Trigger one request per upward scrolling attempt.\n    if (\n      messagesContainer.scrollTop <= 1 &&\n      olderLoadArmed &&\n      !loadingOlder\n    ) {\n      olderLoadArmed = false;\n      loadOlderMessages();\n    }\n\n  }, { passive: true });\n\n\n  // --------------------------------------------------\n  // INPUT HANDLING\n  // --------------------------------------------------\n\n  messageInput.addEventListener(\"input\", () => {\n    messageInput.style.height = \"auto\";\n\n    messageInput.style.height =\n      Math.min(messageInput.scrollHeight, 140) + \"px\";\n  });\n\n\n  messageInput.addEventListener(\"keydown\", event => {\n    if (event.key === \"Enter\" && !event.shiftKey) {\n      event.preventDefault();\n      sendMessage();\n    }\n  });\n\n\n  // --------------------------------------------------\n  // INITIALIZATION\n  // --------------------------------------------------\n\n  function initializeChat() {\n    loadHistory();\n  }\n\n  if (document.readyState === \"loading\") {\n    document.addEventListener(\"DOMContentLoaded\", initializeChat);\n  } else {\n    initializeChat();\n  }\n\n</script>\n"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -1328,
+        -144
+      ],
+      "id": "7f1fc79b-9fc0-408f-99f7-f52c04125259",
+      "name": "Script"
+    },
+    {
+      "parameters": {
+        "html": "\n<style>\n  * {\n    box-sizing: border-box;\n  }\n\n  body {\n    margin: 0;\n    font-family: Arial, sans-serif;\n    background: #f1f5f9;\n    height: 100vh;\n    height: 100dvh;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    color: #1e293b;\n  }\n\n  .chat-container {\n    width: 100%;\n    max-width: 520px;\n    height: 92vh;\n    height: 92dvh;\n    min-height: 0;\n    background: #fff;\n    border-radius: 16px;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    box-shadow: 0 8px 35px #0f172a12;\n    border: 1px solid #e2e8f0;\n  }\n\n  /* Header */\n\n  .header {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 17px 20px;\n    background: #2563eb;\n    color: white;\n    flex-shrink: 0;\n  }\n\n  .header-avatar {\n    width: 42px;\n    height: 42px;\n    flex-shrink: 0;\n    border-radius: 12px;\n    background: #ffffff20;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n  }\n\n  .header-avatar svg {\n    width: 23px;\n    height: 23px;\n  }\n\n  .header-info {\n    flex: 1;\n    min-width: 0;\n  }\n\n  .header-title {\n    font-size: 16px;\n    font-weight: 700;\n  }\n\n  .header-subtitle {\n    display: flex;\n    align-items: center;\n    gap: 6px;\n    margin-top: 4px;\n    font-size: 12px;\n    color: #dbeafe;\n  }\n\n  .online-dot {\n    width: 7px;\n    height: 7px;\n    flex-shrink: 0;\n    background: #4ade80;\n    border-radius: 50%;\n  }\n\n  .header-badge {\n    flex-shrink: 0;\n    font-size: 9px;\n    font-weight: bold;\n    letter-spacing: 1px;\n    background: #ffffff20;\n    padding: 6px 9px;\n    border-radius: 20px;\n  }\n\n  /* Messages */\n\n  #messages {\n    flex: 1;\n    min-height: 0;\n    min-width: 0;\n    padding: 20px;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    scroll-behavior: auto;\n    background: #f8fafc;\n  }\n\n  .message {\n    padding: 12px 15px;\n    border-radius: 14px;\n    max-width: 85%;\n    line-height: 1.55;\n    overflow-wrap: anywhere;\n    font-size: 14px;\n    animation: messageEnter 0.25s ease-out;\n  }\n\n  @keyframes messageEnter {\n    from {\n      opacity: 0;\n      transform: translateY(8px);\n    }\n    to {\n      opacity: 1;\n      transform: translateY(0);\n    }\n  }\n\n  .user {\n    background: #2563eb;\n    color: white;\n    align-self: flex-end;\n    border-bottom-right-radius: 4px;\n  }\n\n  .assistant {\n    background: white;\n    color: #1e293b;\n    align-self: flex-start;\n    border: 1px solid #e2e8f0;\n    border-bottom-left-radius: 4px;\n  }\n\n  /* Typing indicator */\n\n  .typing-indicator {\n    display: flex;\n    align-items: center;\n    gap: 5px;\n    padding: 14px 16px;\n    min-width: 60px;\n  }\n\n  .typing-indicator span:not(.loading-text) {\n    width: 7px;\n    height: 7px;\n    background: #94a3b8;\n    border-radius: 50%;\n    animation: typingBounce 1.2s infinite ease-in-out;\n  }\n\n  .typing-indicator span:nth-child(2) {\n    animation-delay: 0.2s;\n  }\n\n  .typing-indicator span:nth-child(3) {\n    animation-delay: 0.4s;\n  }\n\n  .typing-indicator .loading-text {\n    display: inline-block;\n    width: auto;\n    height: auto;\n    background: none;\n    animation: none;\n    margin-right: 8px;\n    font-size: 13px;\n    font-style: italic;\n    color: #64748b;\n  }\n\n  @keyframes typingBounce {\n    0%, 60%, 100% {\n      transform: translateY(0);\n      opacity: 0.5;\n    }\n    30% {\n      transform: translateY(-6px);\n      opacity: 1;\n    }\n  }\n\n  /* Input area */\n\n  .input-area {\n    padding: 15px 18px 12px;\n    background: white;\n    border-top: 1px solid #e2e8f0;\n    flex-shrink: 0;\n    min-width: 0;\n  }\n\n  .input-wrapper {\n    display: flex;\n    align-items: flex-end;\n    gap: 10px;\n    width: 100%;\n    min-width: 0;\n    padding: 0;\n    background: transparent;\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n  }\n\n  .input-wrapper:focus-within {\n    border: none;\n    box-shadow: none;\n  }\n\n  .input-wrapper textarea {\n    display: block;\n    flex: 1 1 0;\n    width: 0;\n    min-width: 0;\n    max-width: 100%;\n    min-height: 42px;\n    max-height: 140px;\n    margin: 0;\n    padding: 11px 12px;\n    border: none;\n    outline: none;\n    resize: none;\n    overflow-y: auto;\n    box-sizing: border-box;\n    background: white;\n    font-family: inherit;\n    font-size: 16px;\n    line-height: 20px;\n    color: #1e293b;\n    border-radius: 8px;\n    border: 1px solid #e2e8f0;\n  }\n\n  \n  .input-wrapper textarea:focus {\n    border-color: #93c5fd;\n  }\n\n  .input-wrapper textarea::placeholder {\n    color: #94a3b8;\n  }\n\n  .input-wrapper button {\n    display: flex;\n    flex: 0 0 auto;\n    align-self: flex-end;\n    align-items: center;\n    justify-content: center;\n    gap: 7px;\n    padding: 11px 16px;\n    border: none;\n    border-radius: 9px;\n    background: #2563eb;\n    color: white;\n    font-size: 13px;\n    font-weight: 600;\n    white-space: nowrap;\n    cursor: pointer;\n    transition: background 0.2s, transform 0.2s;\n  }\n\n  .input-wrapper button:hover:not(:disabled) {\n    background: #1d4ed8;\n  }\n\n  .input-wrapper button:active:not(:disabled) {\n    transform: scale(0.97);\n  }\n\n  .input-wrapper button:disabled {\n    opacity: 0.5;\n    cursor: not-allowed;\n  }\n\n  .input-wrapper button svg {\n    width: 16px;\n    height: 16px;\n    flex-shrink: 0;\n  }\n\n  .input-hint {\n    text-align: center;\n    font-size: 10px;\n    color: #94a3b8;\n    margin-top: 10px;\n  }\n\n  /* Markdown */\n\n  .message p {\n    margin: 0 0 10px;\n  }\n\n  .message p:last-child {\n    margin-bottom: 0;\n  }\n\n  .message h1,\n  .message h2,\n  .message h3,\n  .message h4 {\n    margin: 14px 0 8px;\n    line-height: 1.3;\n  }\n\n  .message h1 { font-size: 1.35em; }\n  .message h2 { font-size: 1.2em; }\n  .message h3 { font-size: 1.1em; }\n\n  .message ul,\n  .message ol {\n    margin: 8px 0;\n    padding-left: 22px;\n  }\n\n  .message li {\n    margin-bottom: 5px;\n  }\n\n  .message strong {\n    font-weight: 700;\n  }\n\n  .message em {\n    font-style: italic;\n  }\n\n  .message blockquote {\n    margin: 10px 0;\n    padding: 8px 12px;\n    border-left: 3px solid #9ca3af;\n    background: #00000008;\n    border-radius: 4px;\n  }\n\n  .message code {\n    background: #00000012;\n    padding: 2px 5px;\n    border-radius: 4px;\n    font-family: Consolas, monospace;\n    font-size: 0.9em;\n  }\n\n  .message pre {\n    background: #1e293b;\n    color: #f8fafc;\n    padding: 12px;\n    border-radius: 8px;\n    overflow-x: auto;\n    margin: 10px 0;\n  }\n\n  .message pre code {\n    background: none;\n    padding: 0;\n    color: inherit;\n  }\n\n  .message a {\n    color: #2563eb;\n    text-decoration: underline;\n    overflow-wrap: anywhere;\n  }\n\n  .message hr {\n    border: none;\n    border-top: 1px solid #d1d5db;\n    margin: 12px 0;\n  }\n\n  .message table {\n    display: block;\n    width: 100%;\n    max-width: 100%;\n    overflow-x: auto;\n    border-collapse: collapse;\n    margin: 10px 0;\n    font-size: 0.85em;\n  }\n\n  .message th,\n  .message td {\n    border: 1px solid #d1d5db;\n    padding: 8px 10px;\n    text-align: left;\n    min-width: 90px;\n    max-width: 180px;\n    overflow-wrap: break-word;\n    vertical-align: top;\n  }\n\n  .message th {\n    background: #00000010;\n  }\n\n  /* Mobile */\n\n  @media (max-width: 600px) {\n    body {\n      background: white;\n    }\n\n    .chat-container {\n      width: 100%;\n      height: 100vh;\n      height: 100dvh;\n      border-radius: 0;\n      border: none;\n      box-shadow: none;\n    }\n\n    .header {\n      padding: 14px 16px;\n    }\n\n    #messages {\n      padding: 16px;\n    }\n\n    .input-area {\n      padding: 12px;\n    }\n\n    .message {\n      max-width: 90%;\n    }\n\n    .header-badge {\n      display: none;\n    }\n  }\n</style>\n"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -1104,
+        -144
+      ],
+      "id": "1fa666d3-79d8-40c2-a7ee-96f06d4a52ca",
+      "name": "Style"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n{\n  \"bg\": \"#0f172a\"\n}\n",
+        "options": {}
+      },
+      "id": "797b80cd-d124-496b-9d32-123ff7da70b4",
+      "name": "Theme Configuration",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -1552,
+        -144
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message }}",
+        "options": {
+          "systemMessage": "=# Role\n\nYou are an AI Appointment Assistant. Help customers check availability, book appointments, view upcoming appointments, cancel bookings, and reschedule appointments.\n\nBe professional, friendly, concise, and helpful. Communicate naturally like a receptionist.\n\nCurrent date and time (Asia/Manila): {{$now.setZone('Asia/Manila').toISO()}}\n\n# Appointment Types\n\nValid appointment types:\n- consultation\n- standard\n- extended\n- follow_up\n\nAlways use the exact appointment type ID. Never invent appointment types or assume the customer's preferred type.\n\n# General Rules\n\n- Use the connected tools to retrieve appointment information and perform booking operations.\n- Never fabricate availability, appointment details, or booking confirmations.\n- Ask only for information necessary to complete the current request.\n- Interpret dates and times using Asia/Manila timezone.\n- Use readable 12-hour time formatting when communicating with customers.\n- Never expose internal tool names, workflow details, raw JSON, or technical errors.\n- Follow the tool descriptions and input requirements when calling tools.\n\n# Booking\n\n1. Determine the appointment type and preferred date.\n2. Check availability using the appropriate tool.\n3. Present available options and let the customer choose.\n4. Collect their full name if not already provided.\n5. Confirm the selected schedule before booking.\n6. Call the booking tool.\n7. Confirm only after receiving success: true.\n\n# Viewing Appointments\n\nUse the appointment retrieval tool when customers ask about their upcoming bookings.\n\nPresent the results clearly. Never expose internal event IDs.\n\n# Cancellation\n\n1. Retrieve the customer's appointments.\n2. Identify the appointment they want to cancel.\n3. Ask for confirmation before proceeding.\n4. Cancel using the selected appointment's event ID.\n5. Report the result based on the tool response.\n\n# Rescheduling\n\n1. Retrieve the customer's appointments.\n2. Identify the appointment they want to reschedule.\n3. Determine their preferred new date and time.\n4. Check availability for the existing appointment type.\n5. Present available options and confirm their selection.\n6. Reschedule using the selected appointment's event ID.\n7. Report the result based on the tool response.\n\n# Authentication\n\nAuthentication and OTP verification are handled by the upstream workflow.\n\n- Never ask the customer for their session ID.\n- Never invent or modify session IDs.\n- If a tool returns UNAUTHENTICATED, explain that authentication is required before proceeding.\n\n# Email Verification\n\nEmail verification is required before booking an appointment.\n\n1. Collect the customer's email address if it has not been provided.\n2. Call generate_and_send_otp to send the verification code.\n3. Ask the customer to enter the OTP received by email.\n4. Call validate_otp using the code provided by the customer.\n5. Proceed with booking only if the validation tool returns success: true.\n\nIf validation fails, explain that the code is invalid or expired and allow the customer to try again.\n\nNever assume an OTP is valid.\nNever fabricate or guess an OTP.\nNever expose or repeat the OTP unnecessarily.\nDo not call the booking tool before successful OTP validation.\n\n# Error Handling\n\nIf a tool returns success: false:\n- Never claim the operation succeeded.\n- Explain the result in customer-friendly language.\n- Suggest an appropriate next step.\n- For cancellation or rescheduling failures, accurately explain the outcome without assuming the calendar state.\n\nAlways prioritize accuracy, customer confirmation, and successful tool execution.",
+          "enableStreaming": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -1488,
+        80
+      ],
+      "id": "119dacaf-7a7b-44e8-82af-31fd520ec4b7",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemma-4-e4b",
+          "mode": "list",
+          "cachedResultName": "google/gemma-4-e4b"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -1984,
+        320
+      ],
+      "id": "6ee73387-fabe-4c7e-8ca5-92246a639d73",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "vsxOgrcwoi5EBqPa",
+          "name": "lmstudio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "dataPropertyName": "new_uuid"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        -2224,
+        -144
+      ],
+      "id": "00e0f02b-ad9d-484b-b358-93363386eec5",
+      "name": "Crypto"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst headers = $input.first().json.headers ?? {};\n\nconst cookieHeader = headers.cookie ?? '';\n\nconst match = cookieHeader.match(\n  /(?:^|;\\s*)sessionId=([^;]+)/\n);\n\nconst sessionId = match\n  ? decodeURIComponent(match[1])\n  : $input.first().json.new_uuid;\n\nreturn [{\n  json: {\n    sessionId,\n    isNewBrowser: !match\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        -144
+      ],
+      "id": "9256572b-b5ac-4e0d-81cf-fe9407eeec35",
+      "name": "Get/Create Session ID"
+    },
+    {
+      "parameters": {
+        "path": "/agent/appointment-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -2448,
+        -144
+      ],
+      "id": "17b77303-a355-4286-9fb9-1d5670aba96e",
+      "name": "Frontend Hook (Get)",
+      "webhookId": "7637a4be-a9a4-46ac-a2cf-fcd05ef47441"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { session_id, message } = $input.first().json.body;\n\nif (!session_id || !message) {\n  throw new Error(\"Missing type or session_id or message\");\n}\n\nreturn [{\n  json: {\n    session_id,\n    message\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2224,
+        192
+      ],
+      "id": "f6d7f5b9-b263-41d5-a2d7-89b431b07bc8",
+      "name": "Validate Session ID and Message"
+    },
+    {
+      "parameters": {
+        "path": "appointment-chat-history",
+        "responseMode": "lastNode",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -2448,
+        608
+      ],
+      "id": "c6d38bda-d017-4bfe-a8b8-1c52b2332e82",
+      "name": "History Hook (Get)",
+      "webhookId": "6da05620-fea3-423c-9699-da9aa65322af"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "appointment-chat-api",
+        "responseMode": "streaming",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -2448,
+        192
+      ],
+      "id": "81396ae2-3e3e-48ab-bd68-f4e8ace4dd7d",
+      "name": "Message Hook (Post)",
+      "webhookId": "194c6ea3-3931-48d6-9883-7b8af8b17e42"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Validate Session ID and Message').item.json.session_id }}",
+        "tableName": "n8n_shared.n8n_chat_histories",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.4,
+      "position": [
+        -1856,
+        320
+      ],
+      "id": "abaafdc6-356c-410a-ad7f-a88fe1a08e25",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const { session_id } = $input.first().json.query;\n\nif (!session_id) {\n  throw new Error(\"Missing session_id\");\n}\n\nreturn [{\n  json: {\n    session_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2224,
+        608
+      ],
+      "id": "702493be-23e8-45ee-8804-5c8926a38e5e",
+      "name": "Validate Session ID"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO n8n_shared.n8n_chat_histories (session_id, message)\nVALUES (\n  $1,\n  jsonb_build_object(\n    'type', $2,\n    'content', $3,\n    'tool_calls', '[]'::jsonb,\n    'additional_kwargs', '{}'::jsonb,\n    'response_metadata', '{}'::jsonb,\n    'invalid_tool_calls', '[]'::jsonb\n  )\n);",
+        "options": {
+          "queryReplacement": "={{ $('Validate Session ID').item.json.session_id }}, \n{{ $json.type }},\n{{ $json.content }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        -656,
+        640
+      ],
+      "id": "1ba6f4f2-35b0-40b1-bfe5-22af9f3bcc3f",
+      "name": "Insert Memory",
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "668e45b0-0929-48c1-a2a9-095e172241fb",
+              "name": "type",
+              "value": "ai",
+              "type": "string"
+            },
+            {
+              "id": "1ef7c590-2bc3-4f4d-98d6-b9527ba51e35",
+              "name": "content",
+              "value": "Hello! Welcome! 👋\n\nI'm your **AI Appointment Assistant**. I can help you with:\n\n- Checking available schedules\n- Booking an appointment\n- Viewing your upcoming appointments\n- Cancelling or rescheduling an existing booking\n\n**How can I assist you today?** 😀🫡",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -880,
+        640
+      ],
+      "id": "74c59cb4-73bf-4769-967f-88cf3dcdc369",
+      "name": "Memory Details"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "Select COUNT(*) \nfrom n8n_shared.n8n_chat_histories\nwhere session_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Validate Session ID').item.json.session_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        -1328,
+        704
+      ],
+      "id": "34406ce9-c19c-4aa2-9ee6-5dcd61ce7e43",
+      "name": "History Count",
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "7a2fb10b-4218-41af-9273-857c4adc4eff",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -1104,
+        704
+      ],
+      "id": "a148966a-3df0-40f2-9d8c-69fe3ecc6f06",
+      "name": "No History?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, message\nFROM n8n_shared.n8n_chat_histories\nWHERE session_id = $1\n  AND message->>'type' IN ('ai', 'human')\n  AND message->>'content' != '[]'\nORDER BY id DESC\nLIMIT $2::integer;",
+        "options": {
+          "queryReplacement": "={{ $('Validate Session ID').item.json.session_id  }}, {{ $json.pageSize + 1}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        -208,
+        704
+      ],
+      "id": "831a24a1-e1de-41b2-8607-038fc335893f",
+      "name": "Get History",
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageSize = Number($('Page Size').first().json.pageSize);\n\nconst messages = $input.all().reverse().map(item => ({\n  id: item.json.id,\n  [item.json.message.type]: item.json.message.content\n}));\n\nreturn [{\n  json: {\n    messages,\n    hasMore: messages.length === pageSize + 1,\n    oldestId: messages[0]?.id ?? null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        704
+      ],
+      "id": "1bde0918-7630-4de9-bfaa-ad6c982863e8",
+      "name": "Format History"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b005f9e9-5779-46fc-b253-5fd9f4d27c7f",
+              "name": "redis_chat_history_key",
+              "value": "=chat:history:{{ $json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -2000,
+        608
+      ],
+      "id": "28523aeb-09dc-4ad0-9817-98affc8cb39c",
+      "name": "Redis Key"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "cached_history",
+        "key": "={{ $json.redis_chat_history_key }}",
+        "keyType": "string",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1776,
+        608
+      ],
+      "id": "eeab3a59-64ca-495c-b9c4-feb3241e0324",
+      "name": "Get Cache",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = Object.values($(\"Get Cache\").first().json)[0];\n\nlet result = data ?? {};\n\ntry {\n  result = typeof data === 'string' ? JSON.parse(data) : result;\n} catch {\n  result = data;\n}\n\nreturn [\n  {\n    json: typeof result === 'object' && result !== null\n      ? result\n      : $input.first().json\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        512
+      ],
+      "id": "ccc801e6-5ea1-45c8-913b-898d81b0d8cc",
+      "name": "Return Cache"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = Object.values($(\"Get History Cache\").first().json)[0];\n\nlet result = data ?? {};\n\ntry {\n  result = typeof data === 'string' ? JSON.parse(data) : result;\n} catch {\n  result = data;\n}\n\nreturn [\n  {\n    json: typeof result === 'object' && result !== null\n      ? result\n      : $input.first().json\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        192
+      ],
+      "id": "b70e6ff7-0e6f-4c26-9f4e-b270769988cd",
+      "name": "Format Cache"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "cached_history",
+        "key": "={{ $json.redis_chat_history_key }}",
+        "keyType": "string",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        192
+      ],
+      "id": "934568fd-02f3-4761-a3ab-136537682e0c",
+      "name": "Get History Cache",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Set Redis Key').item.json.redis_chat_history_key }}",
+        "value": "={{ $json.cache }}",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 86400
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        704,
+        192
+      ],
+      "id": "47118988-741f-403a-a3b4-fa16b99bb1da",
+      "name": "Update Cache",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Redis Key').item.json.redis_chat_history_key }}",
+        "value": "={{ JSON.stringify($json) }}",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 86400
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        240,
+        704
+      ],
+      "id": "f5758fb2-f83b-4b89-b3f8-e0fc07f18dda",
+      "name": "Set Initial Cache",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b005f9e9-5779-46fc-b253-5fd9f4d27c7f",
+              "name": "redis_chat_history_key",
+              "value": "=chat:history:{{ $('Validate Session ID and Message').item.json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -640,
+        192
+      ],
+      "id": "0d78e844-9edd-47f6-af90-0dc1ae2266d2",
+      "name": "Set Redis Key"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "3ee76830-2b68-4c99-9984-b336554c1eef",
+              "leftValue": "={{ $json.cached_history }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -192,
+        192
+      ],
+      "id": "ad2f9014-b7ad-4ed0-9cd9-4f52cbbd757a",
+      "name": "Have Cache?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "3ee76830-2b68-4c99-9984-b336554c1eef",
+              "leftValue": "={{ $json.cached_history }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -1552,
+        608
+      ],
+      "id": "824e3622-3d35-4e1d-9540-9af96086b27d",
+      "name": "Cache Hit?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cached = $('Format Cache').first().json;\n\nconst session_id = $('Validate Session ID and Message').first().json.session_id;\n\nconst newMessages = $input.all().reverse().map(item => ({\n  id: item.json.id,\n  [item.json.message.type]: item.json.message.content\n}));\n\ncached.messages.push(...newMessages);\n\nreturn [{\n  json: {\n    session_id,\n    cache: JSON.stringify(cached)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        192
+      ],
+      "id": "ce885dd1-70e9-4a0d-b3d1-842bf1dd526a",
+      "name": "Append Messages"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d402f01b-ff05-4651-a785-39d58e2162ea",
+              "name": "pageSize",
+              "value": 10,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -432,
+        704
+      ],
+      "id": "8b7ee776-9a10-437e-a3f8-35a113a6d2a8",
+      "name": "Page Size"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, message\nFROM n8n_shared.n8n_chat_histories\nWHERE session_id = $1\n  AND message->>'type' IN ('ai', 'human')\n  AND message->>'content' != '[]'\nORDER BY id DESC\nLIMIT 2;",
+        "options": {
+          "queryReplacement": "={{ $('Validate Session ID and Message').item.json.session_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        256,
+        192
+      ],
+      "id": "a2d8a869-0704-40e6-b685-73d148a1ea43",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "appointment-chat-history-older",
+        "responseMode": "lastNode",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -2448,
+        928
+      ],
+      "id": "dbc439d2-c9bb-4aec-ae48-35685038603f",
+      "name": "History Older Hook (Get)",
+      "webhookId": "6da05620-fea3-423c-9699-da9aa65322af"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { session_id, before_id } = $input.first().json.query;\n\nif (!session_id || !before_id) {\n  throw new Error(\"Missing session_id or before_id\");\n}\n\nreturn [{\n  json: {\n    session_id,\n    before_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2224,
+        928
+      ],
+      "id": "814787be-3f78-425e-8f48-8a25d1d950b8",
+      "name": "Validate Session ID and Before ID"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d402f01b-ff05-4651-a785-39d58e2162ea",
+              "name": "pageSize",
+              "value": 10,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -2000,
+        928
+      ],
+      "id": "f9e744a1-7e3c-4ecf-a5ba-7d5b7ef2814b",
+      "name": "Page Size1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, message\nFROM n8n_shared.n8n_chat_histories\nWHERE session_id = $1\n  AND id < $2\n  AND message->>'type' IN ('ai', 'human')\n  AND message->>'content' != '[]'\nORDER BY id DESC\nLIMIT $3;",
+        "options": {
+          "queryReplacement": "={{ $('Validate Session ID and Before ID').item.json.session_id }},\n{{ $('Validate Session ID and Before ID').item.json.before_id }},\n{{ $json.pageSize + 1}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        -1776,
+        928
+      ],
+      "id": "0f0355c7-0daf-4822-bf19-677acda5a021",
+      "name": "Get Older History",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "eRXQMMqbJWZOFZvP",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageSize = Number($('Page Size1').first().json.pageSize);\n\nconst rows = $input.all().filter(item =>\n  item.json.id !== undefined &&\n  item.json.message?.type &&\n  item.json.message?.content !== undefined\n);\n\nconst hasMore = rows.length > pageSize;\n\n// Get the nearest older records, then restore chronological order.\nconst messages = rows\n  .slice(0, pageSize)\n  .reverse()\n  .map(item => ({\n    id: item.json.id,\n    [item.json.message.type]: item.json.message.content\n  }));\n\nreturn [{\n  json: {\n    messages,\n    hasMore,\n    oldestId: messages[0]?.id ?? null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        928
+      ],
+      "id": "ad156c68-ef37-4768-8d63-0f67d73c9d47",
+      "name": "Format"
+    },
+    {
+      "parameters": {
+        "description": "Finds available appointment times on a specific date. Use when the customer has a preferred date. Requires a valid appointment type ID and date in YYYY-MM-DD format. Returns available time ranges. This tool does not reserve appointments.",
+        "workflowId": {
+          "__rl": true,
+          "value": "aLFadY6U049hE4je",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/aLFadY6U049hE4je",
+          "cachedResultName": "PRJ001 - Tool - Find Available Slots within the Date"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appointment_type": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('appointment_type', `Exact appointment type ID from the allowed list. Never invent a type.`, 'string') }}",
+            "date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date', `Requested appointment date in YYYY-MM-DD format, interpreted using Asia/Manila.`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "appointment_type",
+              "displayName": "appointment_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1728,
+        320
+      ],
+      "id": "da6998d3-168b-4962-af89-91bf9e4e4f81",
+      "name": "find_available_slots"
+    },
+    {
+      "parameters": {
+        "description": "Finds the earliest available appointment within the next 7 calendar days, including today. Use when the customer has no preferred date or asks for the earliest available appointment. Requires a valid appointment type ID.",
+        "workflowId": {
+          "__rl": true,
+          "value": "a8fsduhfbdkhF94q",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/a8fsduhfbdkhF94q",
+          "cachedResultName": "PRJ001 - Tool - Find Next Available Slot"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appointment_type": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('appointment_type', `Exact appointment type ID from the allowed list. Never invent a type.`, 'string') }}",
+            "max_days": 7
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "appointment_type",
+              "displayName": "appointment_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "max_days",
+              "displayName": "max_days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1600,
+        320
+      ],
+      "id": "650c3497-2474-4c68-8a4f-d490f5e9b4f3",
+      "name": "find_next_available_slot"
+    },
+    {
+      "parameters": {
+        "description": "Retrieves the authenticated customer's upcoming appointments within the next 7 calendar days. Use before cancelling or rescheduling an appointment when its event ID is not already established. Returns appointment details and event IDs.",
+        "workflowId": {
+          "__rl": true,
+          "value": "1zPWnxBTEmUFKcam",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/1zPWnxBTEmUFKcam",
+          "cachedResultName": "PRJ001 - Tool - Find User Appointments"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "max_days": 7,
+            "session_id": "={{ $json.session_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "max_days",
+              "displayName": "max_days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1472,
+        320
+      ],
+      "id": "e967ea70-0ade-4848-9109-a984012f24d6",
+      "name": "find_user_appointments"
+    },
+    {
+      "parameters": {
+        "description": "Books an appointment after the customer has selected a schedule and provided their full name. Requires the appointment date and time in ISO 8601 format with the Asia/Manila timezone offset, appointment type ID, and customer name. The workflow rechecks availability before booking.",
+        "workflowId": {
+          "__rl": true,
+          "value": "S9d8BBiiBxhVD4nV",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/S9d8BBiiBxhVD4nV",
+          "cachedResultName": "PRJ001 - Tool - Book Appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "date_time": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date_time', `Selected appointment start date and time in ISO 8601 format with +08:00 offset.`, 'string') }}",
+            "appointment_type": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('appointment_type', `Exact appointment type ID from the allowed list. Never invent a type.`, 'string') }}",
+            "full_name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('full_name', `Customer's full name as provided in the conversation.`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "date_time",
+              "displayName": "date_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "appointment_type",
+              "displayName": "appointment_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1344,
+        320
+      ],
+      "id": "8bfe5d6c-bfeb-432b-85d2-2a26ef6d56d1",
+      "name": "book_appointment"
+    },
+    {
+      "parameters": {
+        "description": "Cancels an existing appointment. Requires the exact event ID of an appointment returned by find_user_appointments and selected by the customer. The workflow verifies authentication and appointment ownership.",
+        "workflowId": {
+          "__rl": true,
+          "value": "dYYhmlLnoCIZxlxE",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/dYYhmlLnoCIZxlxE",
+          "cachedResultName": "PRJ001 - Tool - Cancel User Appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "event_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('event_id', `Exact event ID returned by find_user_appointments for the appointment selected by the customer. Never invent an event ID.`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1216,
+        320
+      ],
+      "id": "fd57c614-b4ed-4404-a717-69e6d52a87b8",
+      "name": "cancel_user_appointment"
+    },
+    {
+      "parameters": {
+        "description": "Reschedules an existing appointment to a new date and time. Requires the exact event ID of the appointment selected by the customer and the new start time in ISO 8601 format with the Asia/Manila timezone offset. Preserves the existing appointment type and customer details. The workflow handles booking the new appointment and cancelling the original one.",
+        "workflowId": {
+          "__rl": true,
+          "value": "0gsBBPH1bAKW236R",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/0gsBBPH1bAKW236R",
+          "cachedResultName": "PRJ001 - Tool - Reschedule Appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "date_time": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date_time', `Selected appointment start date and time in ISO 8601 format with +08:00 offset.`, 'string') }}",
+            "event_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('event_id', `Exact event ID returned by find_user_appointments for the appointment selected by the customer. Never invent an event ID.`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "date_time",
+              "displayName": "date_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -1088,
+        320
+      ],
+      "id": "8c5cd632-f99f-4d84-a82e-d8974fb1cc3f",
+      "name": "reschedule_appointment"
+    },
+    {
+      "parameters": {
+        "description": "Validates the OTP code submitted by the customer. Use this after the customer provides the verification code received by email. Only proceed with appointment booking if the validation tool returns success: true. If validation fails, explain that the code is invalid or expired and ask the customer to try again.",
+        "workflowId": {
+          "__rl": true,
+          "value": "UUfbh42R8TLlVrTI",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/UUfbh42R8TLlVrTI",
+          "cachedResultName": "Shared - OTP Tool - Validate OTP"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "email": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('email', `The email exactly as provided by the customer.`, 'string') }}",
+            "otp": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('otp', `The verification code exactly as provided by the customer.`, 'number') }}",
+            "session_ttl": 3600
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "otp",
+              "displayName": "otp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "session_ttl",
+              "displayName": "session_ttl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -960,
+        320
+      ],
+      "id": "0064c12c-09f0-44e9-a1bd-66625d952655",
+      "name": "validate_otp"
+    },
+    {
+      "parameters": {
+        "description": "Generates a one-time verification code and sends it to the customer's email address. Use this when the customer is ready to proceed with an appointment booking and their email has not yet been verified. Ask for their email address if it has not been provided. Do not proceed with booking until the OTP has been successfully validated. Do not generate another code unnecessarily.",
+        "workflowId": {
+          "__rl": true,
+          "value": "eVTECZ5eVKcg4G4p",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/eVTECZ5eVKcg4G4p",
+          "cachedResultName": "Shared OTP Tool - Generate and Send OTP"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "email": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('email', `Customer's email address where the OTP verification code will be sent.`, 'string') }}",
+            "TTL": 363,
+            "cooldown": 60
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "TTL",
+              "displayName": "TTL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "cooldown",
+              "displayName": "cooldown",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -832,
+        320
+      ],
+      "id": "416691ec-5da2-41d7-ba57-1169d5c0e695",
+      "name": "generate_and_send_otp"
+    }
+  ],
+  "pinData": {
+    "Frontend Hook (Get)": [
+      {
+        "json": {
+          "headers": {
+            "host": "automationabc.com",
+            "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "accept-encoding": "gzip, br",
+            "accept-language": "en-GB,en;q=0.9,en-PH;q=0.8,en-US;q=0.7",
+            "cache-control": "max-age=0",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "112.198.162.33",
+            "cf-ipcountry": "PH",
+            "cf-ray": "a5acd3e7e82b4669-MNL",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "4ff42a2e-5763-485f-b819-48eab7b71102",
+            "connection": "keep-alive",
+            "cookie": "rl_page_init_referrer=RudderEncrypt%3AU2FsdGVkX1%2Bdh5GpxQN%2BxHipzEXPhW%2B7ZAHqzzaBaqY%3D; rl_page_init_referring_domain=RudderEncrypt%3AU2FsdGVkX19s%2BjeOsA13fVLYz6KuRwbAiR0g7ZvMyVo%3D; rl_anonymous_id=RudderEncrypt%3AU2FsdGVkX19bv338PhAAojS41UYCRhdC5qeTC4EYIGqQB5g5XhMIAjIMJdnCSCbeVMkuDxIcrzVoIovUVnDyOA%3D%3D; rl_group_id=RudderEncrypt%3AU2FsdGVkX18xjm9opuMVS7hJ9g7i66PgC7sU%2FlA71S8%3D; rl_group_trait=RudderEncrypt%3AU2FsdGVkX1%2Bze661plRLldRWIF8gG2Gxw8Ed1%2FbVDY4%3D; rl_user_id=RudderEncrypt%3AU2FsdGVkX19eArU20WO%2BNEUfrQWk0HPxZdt1igLcbmJ2OHX64YkoFZ9yFb6FNa4a3xFWMZFfjc0ZGfRzO1ZtMHN8E3JWCm%2FOQMAFDkc14Wdrc1QMLc%2Fe%2BMiMSIYespQ310x%2F5iSsXuUyAhbajlPv6wG9ywDeuhgYWdAQyKs0F6U%3D; rl_trait=RudderEncrypt%3AU2FsdGVkX19KmlTFSahwR2rcnxHULW33nKFc8lK2e7PJawcafVylCqcJ4TrWjTdn9wsNOqau631QcbNyfWsqHF3GzuhPSxFhjvLVXh2yzezsGf%2BSkw4JDn8DPJeDSB713YzkOu45Xpj3On65%2BpIUHP5Lq%2Bq%2BsSACCdUWM51DbF7M5PHCCetLMP9RpyrzZ%2F%2FKuYc40BMGmbYPHScO%2Bvkauw%3D%3D; rl_session=RudderEncrypt%3AU2FsdGVkX19epT1ppzmISlSKE7dIVX0mvVR90QJo1hAwZ87fXSupjrn8Q1cUSMheCqfBbc4jRX028ajhoXHhuEEnbTzAXybqCgELFqn0%2BohVdOHE3z%2FvB4SRj9TKna1GTNq%2FRVRwGpwFJ7%2FCYNCE6Q%3D%3D; ph_phc_kMstNfAgBcBkWSh6KdsgN09heqqNe5VNmalHP1Ni9Q4_posthog=%7B%22%24device_id%22%3A%2201a1b008-eaa8-7218-806f-4951e51a7aba%22%2C%22distinct_id%22%3A%222946da10cb32e17d3b3d7a3c04192a077fcba729acc5f6701353d5a127ca434e%23704782c5-4de4-480f-b40c-d5450d87ec8a%22%2C%22%24sesid%22%3A%5B1793963538597%2C%2201a1b08f-38b6-7885-8966-694976e36213%22%2C1793963538597%5D%2C%22%24epp%22%3Atrue%2C%22%24initial_person_info%22%3A%7B%22r%22%3A%22%24direct%22%2C%22u%22%3A%22https%3A%2F%2Fn8n.automationabc.com%2Fhome%2Fvariables%22%7D%2C%22%24user_state%22%3A%22identified%22%7D; browserId=f0245aa4-c773-4737-8088-fd474f6cda02",
+            "priority": "u=0, i",
+            "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": "\"iOS\"",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "none",
+            "sec-fetch-user": "?1",
+            "upgrade-insecure-requests": "1",
+            "x-forwarded-for": "112.198.162.33",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {},
+          "webhookUrl": "https://automationabc.com/webhook/appointment-chat",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "History Older Hook (Get)": [
+      {
+        "json": {
+          "headers": {
+            "host": "automationabc.com",
+            "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "accept-language": "en-GB,en;q=0.9,en-PH;q=0.8,en-US;q=0.7",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "112.198.162.33",
+            "cf-ipcountry": "PH",
+            "cf-ray": "a5b51946bc2435a9-MNL",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "402dddf5-e184-4dc3-ab8b-c6016ddf58bd",
+            "connection": "keep-alive",
+            "origin": "null",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": "\"iOS\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "112.198.162.33",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {
+            "session_id": "4fbc32e8-e94a-41d5-9d13-7b2151953e0e",
+            "before_id": "232"
+          },
+          "body": {},
+          "webhookUrl": "https://automationabc.com/webhook/appointment-chat-history-older",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "History Hook (Get)": [
+      {
+        "json": {
+          "headers": {
+            "host": "automationabc.com",
+            "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "accept-language": "en-GB,en;q=0.9,en-PH;q=0.8,en-US;q=0.7",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "112.198.162.33",
+            "cf-ipcountry": "PH",
+            "cf-ray": "a5d6f05bc85b8d09-MNL",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "629091d8-6b41-4e0a-8b94-f3c6b094524d",
+            "connection": "keep-alive",
+            "origin": "null",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": "\"iOS\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "112.198.162.33",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {
+            "session_id": "59c43331-8f87-4c2e-b90d-ce25f2142f9e"
+          },
+          "body": {},
+          "webhookUrl": "https://automationabc.com/webhook/appointment-chat-history",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Message Hook (Post)": [
+      {
+        "json": {
+          "headers": {
+            "host": "automationabc.com",
+            "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+            "content-length": "89",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "accept-language": "en-GB,en;q=0.9,en-PH;q=0.8,en-US;q=0.7",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "112.198.162.33",
+            "cf-ipcountry": "PH",
+            "cf-ray": "a5e0e95caca28d0f-MNL",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "1ca56cf1-bbaf-41a0-be51-7cf8bd3a034c",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "origin": "null",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Chromium\";v=\"158\", \"Not.A/Brand\";v=\"24\", \"Microsoft Edge\";v=\"158\"",
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": "\"iOS\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "112.198.162.33",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "session_id": "b0b13716-9e41-4bbf-98f3-a6ecc2557631",
+            "message": "im john philip de roxas"
+          },
+          "webhookUrl": "https://automationabc.com/webhook/appointment-chat-api",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Configuration": {
+      "main": [
+        [
+          {
+            "node": "Theme Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script": {
+      "main": [
+        [
+          {
+            "node": "Style",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Style": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Theme Configuration": {
+      "main": [
+        [
+          {
+            "node": "Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Set Redis Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto": {
+      "main": [
+        [
+          {
+            "node": "Get/Create Session ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get/Create Session ID": {
+      "main": [
+        [
+          {
+            "node": "Form Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Frontend Hook (Get)": {
+      "main": [
+        [
+          {
+            "node": "Crypto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History Hook (Get)": {
+      "main": [
+        [
+          {
+            "node": "Validate Session ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Hook (Post)": {
+      "main": [
+        [
+          {
+            "node": "Validate Session ID and Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Session ID and Message": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Session ID": {
+      "main": [
+        [
+          {
+            "node": "Redis Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Memory": {
+      "main": [
+        [
+          {
+            "node": "Page Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory Details": {
+      "main": [
+        [
+          {
+            "node": "Insert Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History Count": {
+      "main": [
+        [
+          {
+            "node": "No History?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No History?": {
+      "main": [
+        [
+          {
+            "node": "Memory Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Page Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get History": {
+      "main": [
+        [
+          {
+            "node": "Format History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format History": {
+      "main": [
+        [
+          {
+            "node": "Set Initial Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Key": {
+      "main": [
+        [
+          {
+            "node": "Get Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Cache": {
+      "main": [
+        [
+          {
+            "node": "Cache Hit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Cache": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get History Cache": {
+      "main": [
+        [
+          {
+            "node": "Have Cache?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Redis Key": {
+      "main": [
+        [
+          {
+            "node": "Get History Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Have Cache?1": {
+      "main": [
+        [
+          {
+            "node": "Format Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Hit?": {
+      "main": [
+        [
+          {
+            "node": "Return Cache",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "History Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Messages": {
+      "main": [
+        [
+          {
+            "node": "Update Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page Size": {
+      "main": [
+        [
+          {
+            "node": "Get History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Append Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History Older Hook (Get)": {
+      "main": [
+        [
+          {
+            "node": "Validate Session ID and Before ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Session ID and Before ID": {
+      "main": [
+        [
+          {
+            "node": "Page Size1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page Size1": {
+      "main": [
+        [
+          {
+            "node": "Get Older History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Older History": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_available_slots": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_next_available_slot": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_user_appointments": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "book_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancel_user_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reschedule_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validate_otp": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generate_and_send_otp": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "c67wTdeBo9PWUn2F",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "53ced83f-de5f-4f7a-91ba-a02dd5b2d9d7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1fbd8342f09182b49d85a9c75b180d46bc9cd7e7b9d41cfd6c15ba9b92aaf748"
+  },
+  "nodeGroups": [],
+  "id": "oLd8yXMKwkvJXDPb",
+  "tags": [
+    {
+      "updatedAt": "2026-11-21T09:37:54.808Z",
+      "createdAt": "2026-11-21T09:37:54.808Z",
+      "id": "nLLqhRxUSphLyUUD",
+      "name": "Project Workflow"
+    }
+  ]
+}

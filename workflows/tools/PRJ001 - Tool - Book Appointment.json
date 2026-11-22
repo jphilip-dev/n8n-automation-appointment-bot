@@ -1,0 +1,854 @@
+{
+  "name": "PRJ001 - Tool - Book Appointment",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "date_time"
+            },
+            {
+              "name": "appointment_type"
+            },
+            {
+              "name": "full_name"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2000,
+        224
+      ],
+      "id": "df77e5fa-f837-40fd-b7a0-0a80f5b64037",
+      "name": "SubFlow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst config = $('Configuration').first().json;\nconst dateCheck = $('Check Date').first().json;\n\nconst dateTime = $('SubFlow Trigger').first().json.date_time;\nconst duration = Number($input.first().json.duration_minutes);\n\nfunction invalid(error) {\n  return [{\n    json: {\n      valid: false,\n      error\n    }\n  }];\n}\n\n// Validate duration\nif (!Number.isFinite(duration) || duration <= 0) {\n  return invalid('Invalid appointment duration.');\n}\n\n// Validate start timestamp\nconst startTimestamp = Date.parse(dateTime);\n\nif (!Number.isFinite(startTimestamp)) {\n  return invalid('Invalid appointment date and time.');\n}\n\n// Get appointment start time in configured timezone\nconst [hour, minute] = dateCheck.local_time.split(':').map(Number);\n\nconst startMinutes = hour * 60 + minute;\nconst endMinutes = startMinutes + duration;\n\n// Check closing time\nconst closingMinutes = Number(config.closingHour) * 60;\n\nif (endMinutes > closingMinutes) {\n  return invalid('Appointment duration exceeds working hours.');\n}\n\n// Check lunch break overlap\nconst lunchStart = Number(config.lunch_start) * 60;\nconst lunchEnd = Number(config.lunch_end) * 60;\n\nif (\n  startMinutes < lunchEnd &&\n  endMinutes > lunchStart\n) {\n  return invalid('Appointment overlaps with the lunch break.');\n}\n\n// Calculate end timestamp\nconst endTimestamp = startTimestamp + duration * 60 * 1000;\n\n// Format timestamps in configured timezone with the correct UTC offset\nconst formatLocal = timestamp => {\n  const date = new Date(timestamp);\n\n  const localTime = date.toLocaleString('sv-SE', {\n    timeZone: config.timezone,\n    hour12: false\n  }).replace(' ', 'T');\n\n  const offset = new Intl.DateTimeFormat('en-US', {\n    timeZone: config.timezone,\n    timeZoneName: 'longOffset'\n  })\n    .formatToParts(date)\n    .find(part => part.type === 'timeZoneName')\n    .value\n    .replace('GMT', '');\n\n  return localTime + (offset === '' ? 'Z' : offset);\n};\n\nreturn [{\n  json: {\n    valid: true,\n    start_time: formatLocal(startTimestamp),\n    end_time: formatLocal(endTimestamp),\n    duration_minutes: duration\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -64
+      ],
+      "id": "54e5ee00-519f-4082-98e7-51dac924c112",
+      "name": "Calculate End Time"
+    },
+    {
+      "parameters": {
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "value": "52c07e65f8603945270ce62e675474576225c4fa2356d326e361671b9c8763ec@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "MyBusiness"
+        },
+        "timeMin": "={{ $json.start_time }}",
+        "timeMax": "={{ $json.end_time}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.4,
+      "position": [
+        688,
+        -160
+      ],
+      "id": "3c9d869e-ca29-42cb-b987-0db6b03f338a",
+      "name": "Get availability in a calendar",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "2qRyvYhDS0yzzs96",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "52c07e65f8603945270ce62e675474576225c4fa2356d326e361671b9c8763ec@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "MyBusiness"
+        },
+        "start": "={{ $('Calculate End Time').item.json.start_time }}",
+        "end": "={{ $('Calculate End Time').item.json.end_time }}",
+        "useDefaultReminders": false,
+        "additionalFields": {
+          "description": "=Email: {{ $('Convert to JSON').item.json.email }}\nCustomer: {{ $('SubFlow Trigger').first().json.full_name }}\nAppointment Type: {{ $('SubFlow Trigger').first().json.appointment_type }}",
+          "summary": "={{ $('SubFlow Trigger').first().json.full_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.4,
+      "position": [
+        1136,
+        -256
+      ],
+      "id": "d7f77da8-6f7f-4f54-8c9c-e7ea3b3fa2d7",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "2qRyvYhDS0yzzs96",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9ee70b80-3e50-4f02-92fc-16dff970178c",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "abc314ad-a836-4d21-9cc7-55c99656a166",
+              "name": "error",
+              "value": "=The slot is unavailable",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1136,
+        -64
+      ],
+      "id": "b11d6068-825f-4177-9ae8-43b7c772265f",
+      "name": "Return Slot Unavailable"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "abc314ad-a836-4d21-9cc7-55c99656a166",
+              "name": "success",
+              "value": "=true",
+              "type": "string"
+            },
+            {
+              "id": "6de2b4f2-a167-4fb1-a1f5-ed014763a951",
+              "name": "message",
+              "value": "Appointment booked successfully.",
+              "type": "string"
+            },
+            {
+              "id": "d86147f3-1e24-490d-aee4-b41838b18a64",
+              "name": "event_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4274c95d-a6cb-4a17-b522-bed31481f77f",
+              "name": "name",
+              "value": "={{ $('SubFlow Trigger').item.json.full_name }}",
+              "type": "string"
+            },
+            {
+              "id": "64e0e4e0-fb2f-43a2-b680-90333191787f",
+              "name": "appointment_type",
+              "value": "={{ $('SubFlow Trigger').first().json.appointment_type }}",
+              "type": "string"
+            },
+            {
+              "id": "c9c2ec2c-fcf5-4940-9058-b4d415ec1cf5",
+              "name": "start_time",
+              "value": "={{ $('Calculate End Time').item.json.start_time }}",
+              "type": "string"
+            },
+            {
+              "id": "b91ab529-a322-4f40-adb5-be9e3337443e",
+              "name": "end_time",
+              "value": "={{ $('Calculate End Time').item.json.end_time }}",
+              "type": "string"
+            },
+            {
+              "id": "04740e47-03fb-4ea0-a5b4-0dd0ee8b538c",
+              "name": "duration_minutes",
+              "value": "={{ $('Calculate End Time').item.json.duration_minutes }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1360,
+        -256
+      ],
+      "id": "a9305808-cc37-4502-96f9-b43677989bac",
+      "name": "Return Success"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Configuration').first().json;\nconst dateTime = $('SubFlow Trigger').first().json.date_time;\n\nconst {\n  timezone,\n  working_days,\n  openingHour,\n  closingHour,\n  slot_interval_minutes\n} = config;\n\nfunction invalid(error) {\n  return [{ json: { valid: false, error } }];\n}\n\n// Require an ISO datetime with an explicit timezone\nif (\n  typeof dateTime !== 'string' ||\n  !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})$/.test(dateTime)\n) {\n  return invalid('Invalid date_time. Provide an ISO datetime with a timezone offset.');\n}\n\nconst timestamp = Date.parse(dateTime);\n\nif (!Number.isFinite(timestamp)) {\n  return invalid('Invalid date_time.');\n}\n\n// Reject past appointments\nif (timestamp <= Date.now()) {\n  return invalid('Appointment time must be in the future.');\n}\n\n// Convert the requested datetime into the configured timezone\nlet parts;\n\ntry {\n  parts = new Intl.DateTimeFormat('en-GB', {\n    timeZone: timezone,\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n    hour: '2-digit',\n    minute: '2-digit',\n    second: '2-digit',\n    hourCycle: 'h23'\n  }).formatToParts(new Date(timestamp));\n} catch {\n  return invalid('Invalid configured timezone.');\n}\n\nconst local = Object.fromEntries(\n  parts.map(part => [part.type, part.value])\n);\n\nconst date = `${local.year}-${local.month}-${local.day}`;\nconst hour = Number(local.hour);\nconst minute = Number(local.minute);\nconst second = Number(local.second);\n\n// Reject seconds and fractional seconds\nif (second !== 0 || new Date(timestamp).getUTCMilliseconds() !== 0) {\n  return invalid('Appointment time must use whole minutes.');\n}\n\n// Validate working day\nconst [year, month, day] = date.split('-').map(Number);\nconst parsedDate = new Date(Date.UTC(year, month - 1, day));\nconst dayOfWeek = parsedDate.getUTCDay() || 7;\n\nif (!working_days.includes(dayOfWeek)) {\n  return invalid('Appointments are not available on this day.');\n}\n\n// Validate opening and closing hours\nconst requestedMinutes = hour * 60 + minute;\nconst openingMinutes = Number(openingHour) * 60;\nconst closingMinutes = Number(closingHour) * 60;\n\nif (\n  requestedMinutes < openingMinutes ||\n  requestedMinutes >= closingMinutes\n) {\n  return invalid('Appointment time is outside working hours.');\n}\n\n// Validate slot interval\nif (\n  !Number.isInteger(Number(slot_interval_minutes)) ||\n  Number(slot_interval_minutes) <= 0 ||\n  minute % Number(slot_interval_minutes) !== 0\n) {\n  return invalid('Appointment time does not follow the configured slot interval.');\n}\n\nreturn [{\n  json: {\n    ...config,\n    valid: true,\n    date_time: dateTime,\n    date,\n    local_time: `${local.hour}:${local.minute}`,\n    day_of_week: dayOfWeek\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        128
+      ],
+      "id": "f64d0a25-34d4-4aa2-ab47-c4c9bec70a2d",
+      "name": "Check Date"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "65b1fad2-b432-4d40-9ce2-94570d314a9f",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -432,
+        128
+      ],
+      "id": "1b8d9e2f-a116-4f12-8d4b-d02188692d04",
+      "name": "Valid Date?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0945f44a-829f-4cea-9004-6d41f0c4cc66",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "077388c5-6c4d-449e-b601-97df32185501",
+              "name": "error",
+              "value": "={{ $('Check Date').item.json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -208,
+        224
+      ],
+      "id": "621625bf-0223-4393-8e81-287c9893bd15",
+      "name": "Return Invalid Date"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8fafe96e-0fd0-44c0-9b3e-e65660a3085e",
+              "name": "sucess",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "077388c5-6c4d-449e-b601-97df32185501",
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        240,
+        128
+      ],
+      "id": "42eedcaa-93ae-44e9-a68b-f186f5b4d974",
+      "name": "Return Invalid Appointment Type"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Configuration').first().json;\nconst appointmentType = $('SubFlow Trigger').first().json.appointment_type;\n\nconst selectedType = config.types.find(\n  type => type.name === appointmentType\n);\n\nif (!selectedType) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Invalid appointment type.',\n      allowed_types: config.types.map(type => type.name)\n    }\n  }];\n}\n\nconst duration = Number(selectedType.duration_minutes);\n\nif (!Number.isFinite(duration) || duration <= 0) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Invalid appointment duration configured for this appointment type.'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    valid: true,\n    appointment_type: selectedType.name,\n    duration_minutes: duration\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        32
+      ],
+      "id": "98722075-1b33-4f5b-88c7-cb87aded9fea",
+      "name": "Check Appointment Type"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "65b1fad2-b432-4d40-9ce2-94570d314a9f",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        16,
+        32
+      ],
+      "id": "5288c5a0-1178-41ab-8e68-46995c6fa2a3",
+      "name": "Valid Appointment Type?"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json.propertyName;\n\nlet session;\n\ntry {\n  session = typeof data === 'string'\n    ? JSON.parse(data)\n    : data;\n} catch {\n  session = {};\n}\n\nif (!session || typeof session !== 'object' || Array.isArray(session)) {\n  session = {};\n}\n\nreturn [{\n  json: session\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        224
+      ],
+      "id": "8f72e2b4-dec9-47b2-ac02-2233cce18958",
+      "name": "Convert to JSON"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d6d94161-4bc6-4884-b7d6-98ea24377441",
+              "name": "redis_session_key",
+              "value": "=session:{{ $json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1552,
+        224
+      ],
+      "id": "24bf98b1-8137-409c-9950-8dde94abfa23",
+      "name": "Redis Keys"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "cc76ef96-a3c3-4960-b743-c9d7f1cdd02e",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "679cb7bb-b677-481b-bc08-17d58e43c5e6",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "AUTHENTICATED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -880,
+        224
+      ],
+      "id": "49dcb42e-6bf9-461a-9c65-262ac14179c9",
+      "name": "Authenticated?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "7b2a464c-dc3c-4c2a-b107-f1feef5a2b07",
+              "leftValue": "={{ $json.available }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        912,
+        -160
+      ],
+      "id": "36525df5-df8d-43d8-a8d4-d76990f0095f",
+      "name": "Slot Available?"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.redis_session_key }}",
+        "options": {
+          "dotNotation": true
+        }
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        224
+      ],
+      "id": "b8e28caa-4fd2-49b4-9f87-102eb3187884",
+      "name": "Get Session Value",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "1b58116a-2f85-4279-9a30-7ff9767097e0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        464,
+        -64
+      ],
+      "id": "6f9ac93b-2fa1-4953-ad53-66e9f4900e50",
+      "name": "Valid Time?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c5961684-d702-4fa9-870b-8197747481ab",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "077388c5-6c4d-449e-b601-97df32185501",
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        688,
+        32
+      ],
+      "id": "93983cb0-4b10-4af4-9f1f-0a013b2ce004",
+      "name": "Return Invalid Time"
+    },
+    {
+      "parameters": {
+        "content": "# PRJ001 - Tool - Book Appointment\n\n**Purpose:** Books an appointment after authentication, validation, and availability checks.\n\n**Inputs:** `session_id`, `date_time`, `appointment_type`, `full_name`\n\n**Process:**\n1. Authenticate the customer using Redis.\n2. Validate the requested date, time, and appointment type.\n3. Calculate the appointment end time and check scheduling rules.\n4. Check Google Calendar availability.\n5. Create the appointment and save customer details.\n6. Return booking confirmation.\n\n**Error Handling:** Covers authentication, invalid dates or appointment types, scheduling conflicts, and unavailable slots.\n\n**Configuration:** Uses the shared Configuration node for timezone, working hours, lunch breaks, working days, slot intervals, and appointment durations.\n\n**Dependencies:** Redis, Google Calendar, and Configuration.",
+        "height": 368,
+        "width": 1088,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2000,
+        -176
+      ],
+      "typeVersion": 1,
+      "id": "6ca7eeba-a07b-476b-a714-66e86fe9b287",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "putAllInOneKey": false
+      },
+      "type": "n8n-nodes-globals.globalConstants",
+      "typeVersion": 1,
+      "position": [
+        -1776,
+        224
+      ],
+      "id": "957ce14c-5c24-4fc0-a991-f52bad56bced",
+      "name": "Configuration",
+      "credentials": {
+        "globalConstantsApi": {
+          "id": "mUJxQI24ub6DPOoS",
+          "name": "001 - Appointment Automation"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6a2696c3-7ee7-47ad-89d5-893f411773ee",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "077388c5-6c4d-449e-b601-97df32185501",
+              "name": "error_code",
+              "value": "UNAUTHENTICATED",
+              "type": "string"
+            },
+            {
+              "id": "defac664-ed75-4952-b3f5-30a06ccee06a",
+              "name": "error",
+              "value": "={{ $('Configuration').item.json.error_messages.UNAUTHENTICATED }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -656,
+        320
+      ],
+      "id": "c5370196-259b-4afb-a443-ded918bc51e8",
+      "name": "Return Unauthenticated"
+    }
+  ],
+  "pinData": {
+    "SubFlow Trigger": [
+      {
+        "json": {
+          "session_id": "b0b13716-9e41-4bbf-98f3-a6ecc2557631",
+          "date_time": "2026-11-23T09:00:00+08:00",
+          "appointment_type": "consultation",
+          "full_name": "john philip de roxas"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "SubFlow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate End Time": {
+      "main": [
+        [
+          {
+            "node": "Valid Time?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get availability in a calendar": {
+      "main": [
+        [
+          {
+            "node": "Slot Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Return Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Date": {
+      "main": [
+        [
+          {
+            "node": "Valid Date?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Date?": {
+      "main": [
+        [
+          {
+            "node": "Check Appointment Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Invalid Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Appointment Type": {
+      "main": [
+        [
+          {
+            "node": "Valid Appointment Type?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Appointment Type?": {
+      "main": [
+        [
+          {
+            "node": "Calculate End Time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Invalid Appointment Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Keys": {
+      "main": [
+        [
+          {
+            "node": "Get Session Value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to JSON": {
+      "main": [
+        [
+          {
+            "node": "Authenticated?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticated?": {
+      "main": [
+        [
+          {
+            "node": "Check Date",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Unauthenticated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slot Available?": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Slot Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Session Value": {
+      "main": [
+        [
+          {
+            "node": "Convert to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Time?": {
+      "main": [
+        [
+          {
+            "node": "Get availability in a calendar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Invalid Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Redis Keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "71ee162c-11b8-4b08-8ce1-1202632e2488",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1fbd8342f09182b49d85a9c75b180d46bc9cd7e7b9d41cfd6c15ba9b92aaf748"
+  },
+  "nodeGroups": [],
+  "id": "S9d8BBiiBxhVD4nV",
+  "tags": [
+    {
+      "updatedAt": "2026-11-21T09:37:37.781Z",
+      "createdAt": "2026-11-21T09:37:37.781Z",
+      "id": "MYR1ImnyqltxZRAZ",
+      "name": "Project Tool"
+    }
+  ]
+}

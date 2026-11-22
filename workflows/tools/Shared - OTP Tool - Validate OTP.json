@@ -1,0 +1,776 @@
+{
+  "name": "Shared - OTP Tool - Validate OTP",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "email"
+            },
+            {
+              "name": "otp",
+              "type": "number"
+            },
+            {
+              "name": "session_ttl",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -224,
+        -240
+      ],
+      "id": "8d4b579e-58a4-44da-9b7a-d24fdd0c916b",
+      "name": "SubFlow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = Object.values($input.first().json)[0];\n\nlet result = data ?? {};\n\ntry {\n  result = typeof data === 'string' ? JSON.parse(data) : result;\n} catch {\n  result = data;\n}\n\nreturn [\n  {\n    json: typeof result === 'object' && result !== null\n      ? result\n      : $input.first().json\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -336
+      ],
+      "id": "ccb1ae92-c431-43c0-8e8a-8f7914712d55",
+      "name": "Convert to JSON"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.redis_otp_key }}",
+        "options": {
+          "dotNotation": true
+        }
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        448,
+        -336
+      ],
+      "id": "f634cad7-b88f-4471-a7d4-97d3a299df1d",
+      "name": "Get OTP Value",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "5ece644c-7098-449a-a46e-fc9b031e04b8",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        896,
+        -336
+      ],
+      "id": "a76c5a2f-a3f3-45f8-99e4-74a85de147ff",
+      "name": "Missing OTP?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "a3f9ffb8-a352-4d1a-9c97-078fc6153d91",
+              "leftValue": "={{ $json.mismatch_count }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        -272
+      ],
+      "id": "59e04819-aa63-4ead-9f59-6b0cba4c2f15",
+      "name": "Max Retries reached?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_MAX_RETRY_REACHED",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "Max retries has been reached. Please try again later",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2464,
+        -464
+      ],
+      "id": "4df96ab7-9850-4986-b997-8197d25d8bf9",
+      "name": "Return Max retry reached"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "3f32a38d-d7d8-49aa-b12e-dcdde7949ea3",
+              "leftValue": "={{ $('SubFlow Trigger').item.json.otp }}",
+              "rightValue": "={{ $('Convert to JSON').item.json.otp }}",
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1344,
+        -192
+      ],
+      "id": "e09caf2c-d777-4987-ba10-492f5dbde539",
+      "name": "OTP Mismatch?"
+    },
+    {
+      "parameters": {
+        "operation": "ttl",
+        "key": "={{ $('Redis Keys').item.json.redis_otp_key }}"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        -288
+      ],
+      "id": "7483a567-49af-41e2-9ee7-8faa192bc826",
+      "name": "Get Remaining TIme",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Redis Keys').item.json.redis_otp_key }}",
+        "value": "={\n  \"otp\": {{ $('Convert to JSON').item.json.otp }},\n  \"mismatch_count\": {{ $('Convert to JSON').item.json.mismatch_count + 1}},\n  \"resend_count\": {{ $('Convert to JSON').item.json.resend_count }}\n}",
+        "expire": true,
+        "ttl": "={{ Number($json.ttl)}}"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        -240
+      ],
+      "id": "f32b31a6-15dc-4fa5-816b-0985f562c972",
+      "name": "Update OTP Mismatch Count",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_MISSING_OR_EXPIRED",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "The OTP is missing or has expired. Please request a new one",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2016,
+        -656
+      ],
+      "id": "a0be9a61-50a5-43e5-b519-f36e904b574b",
+      "name": "Return Missing or Expired OTP"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_MISMATCH",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "The provided OTP is incorrect.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2464,
+        -192
+      ],
+      "id": "ec23f006-71c4-4313-afc3-8fe6215102d2",
+      "name": "Return OTP Mismatch"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "55bfaf05-d234-49c9-ba7f-3754ab8e7187",
+              "name": "redis_otp_key",
+              "value": "=otp:{{ $json.session_id }}:{{ $json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "d6d94161-4bc6-4884-b7d6-98ea24377441",
+              "name": "redis_session_key",
+              "value": "=session:{{ $json.session_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        -336
+      ],
+      "id": "94d710a0-c70d-408d-8f4b-eebe501e8023",
+      "name": "Redis Keys"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Redis Keys').item.json.redis_session_key }}",
+        "value": "={\n  \"status\": \"AUTHENTICATED\",\n  \"email\": \"{{ $('SubFlow Trigger').item.json.email }}\"\n}",
+        "expire": true,
+        "ttl": "={{ $('SubFlow Trigger').item.json.session_ttl }}"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        -48
+      ],
+      "id": "d31d20e9-56d8-4395-84d5-dec00816085d",
+      "name": "Set Session Value",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Redis Keys').item.json.redis_otp_key }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        -48
+      ],
+      "id": "eb58a197-dd6e-4ea4-bc2d-1885fe49d13d",
+      "name": "Remove OTP",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "3f3b36fd-f61d-4d37-bced-c1740ec4e1d7",
+              "leftValue": "={{$json.ttl}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1792,
+        -288
+      ],
+      "id": "308be39a-080b-499a-9778-4f6f4dd83152",
+      "name": "Expired OTP?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "a3f9ffb8-a352-4d1a-9c97-078fc6153d91",
+              "leftValue": "={{ $('Convert to JSON').item.json.mismatch_count + 1}}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        2240,
+        -240
+      ],
+      "id": "93fa8f53-3aaa-4b02-8124-de56c33174d6",
+      "name": "Max Retries reached??"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_VALIDATED",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "OTP verified successfully.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2016,
+        -48
+      ],
+      "id": "c484d8c4-2236-4d0b-8c01-61bafb53574c",
+      "name": "Return OTP Success"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "ede2b2f1-ec14-426a-9c14-ba6992384222",
+              "leftValue": "={{ Number.isInteger($json.otp) && $json.otp >= 100000 && $json.otp <= 999999 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        0,
+        -240
+      ],
+      "id": "0c2985e8-29e0-417e-a2cc-a292ea6abf36",
+      "name": "Validate OTP Format"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_INVALID_INPUT",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "Please provide a valid 6-digit OTP.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        -144
+      ],
+      "id": "e6346fcc-ab2b-4540-9897-f8e579e44b69",
+      "name": "Return Invalid OTP Format"
+    },
+    {
+      "parameters": {
+        "content": "###  Read Me\n\n### OTP Tool – Validate OTP\n\n**Purpose**\n\nValidates a submitted OTP against the OTP stored in Redis and creates an authenticated session when verification succeeds.\n\n**Workflow Inputs**\n\n| Input | Description |\n|---|---|\n| `session_id` | Unique session identifier |\n| `email` | Email associated with the OTP |\n| `otp` | Submitted six-digit OTP |\n| `session_ttl` | Authenticated session lifetime in seconds |\n\n**Validation Process**\n\n1. Validate that the submitted OTP is a six-digit number.\n2. Retrieve the OTP record from Redis using `otp:{session_id}:{email}`.\n3. Check whether the OTP exists and has not expired.\n4. Check whether the maximum of three incorrect attempts has been reached.\n5. Compare the submitted OTP with the stored OTP.\n6. If incorrect, increment the mismatch count while preserving the remaining OTP expiration time.\n7. If the third incorrect attempt is reached, return a maximum retry response.\n8. If correct, create an authenticated session in Redis using `session:{session_id}`.\n9. Delete the OTP record after successful authentication.\n\n**Possible Response Statuses**\n\n| Status | Description |\n|---|---|\n| `OTP_INVALID_INPUT` | Submitted OTP is not a valid six-digit number |\n| `OTP_MISSING_OR_EXPIRED` | OTP does not exist or has expired |\n| `OTP_MAX_RETRY_REACHED` | Maximum of three incorrect attempts reached |\n| `OTP_MISMATCH` | Submitted OTP does not match |\n| `OTP_VALIDATED` | OTP successfully verified |\n\n**Redis Records**\n\n- OTP record: `otp:{session_id}:{email}`\n- Authenticated session: `session:{session_id}`\n\n**Notes**\n\n- OTP mismatch count is initialized at zero.\n- Maximum allowed incorrect attempts: 3.\n- OTP expiration is preserved during mismatch updates.\n- Authenticated session expiration is controlled by `session_ttl`.\n- OTP is deleted after successful validation.",
+        "height": 1088,
+        "width": 992,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1312,
+        -704
+      ],
+      "typeVersion": 1,
+      "id": "f9fd32f9-d459-4616-8709-c0cee7015f49",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {
+    "SubFlow Trigger": [
+      {
+        "json": {
+          "session_id": "test-session-id",
+          "email": "test@gg.com",
+          "otp": 123703,
+          "session_ttl": 36000
+        }
+      }
+    ]
+  },
+  "connections": {
+    "SubFlow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate OTP Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OTP Value": {
+      "main": [
+        [
+          {
+            "node": "Convert to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to JSON": {
+      "main": [
+        [
+          {
+            "node": "Missing OTP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Missing OTP?": {
+      "main": [
+        [
+          {
+            "node": "Return Missing or Expired OTP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Max Retries reached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Max Retries reached?": {
+      "main": [
+        [
+          {
+            "node": "Return Max retry reached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OTP Mismatch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTP Mismatch?": {
+      "main": [
+        [
+          {
+            "node": "Get Remaining TIme",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Session Value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Remaining TIme": {
+      "main": [
+        [
+          {
+            "node": "Expired OTP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update OTP Mismatch Count": {
+      "main": [
+        [
+          {
+            "node": "Max Retries reached??",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Keys": {
+      "main": [
+        [
+          {
+            "node": "Get OTP Value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Session Value": {
+      "main": [
+        [
+          {
+            "node": "Remove OTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expired OTP?": {
+      "main": [
+        [
+          {
+            "node": "Return Missing or Expired OTP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update OTP Mismatch Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return OTP Mismatch": {
+      "main": [
+        []
+      ]
+    },
+    "Max Retries reached??": {
+      "main": [
+        [
+          {
+            "node": "Return Max retry reached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return OTP Mismatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove OTP": {
+      "main": [
+        [
+          {
+            "node": "Return OTP Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate OTP Format": {
+      "main": [
+        [
+          {
+            "node": "Redis Keys",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Invalid OTP Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7c094369-a025-4dad-a4f4-d258db2e8d38",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1fbd8342f09182b49d85a9c75b180d46bc9cd7e7b9d41cfd6c15ba9b92aaf748"
+  },
+  "nodeGroups": [],
+  "id": "UUfbh42R8TLlVrTI",
+  "tags": []
+}

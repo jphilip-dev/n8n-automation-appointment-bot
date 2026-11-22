@@ -1,0 +1,582 @@
+{
+  "name": "Shared OTP Tool - Generate and Send OTP",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ed46d215-68c2-4e9d-9cce-658ff480ce5c",
+              "name": "redis_otp_key",
+              "value": "=otp:{{ $json.session_id }}:{{ $json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "3cc38ac5-6dc7-4b4f-b3c9-a7dcabd0d57b",
+              "name": "redis_otp_cooldown_key",
+              "value": "=otp:cooldown:{{ $json.session_id }}:{{ $json.email }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        240,
+        -432
+      ],
+      "id": "cdd61e94-f770-4b6f-b02a-b7b50995b24c",
+      "name": "Redis Key"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = Object.values($input.first().json)[0];\n\nlet result = data ?? {};\n\ntry {\n  result = typeof data === 'string' ? JSON.parse(data) : result;\n} catch {\n  result = data;\n}\n\nreturn [\n  {\n    json: typeof result === 'object' && result !== null\n      ? result\n      : $input.first().json\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        -432
+      ],
+      "id": "809e56ff-b6bb-47e2-8223-b00050d08119",
+      "name": "Convert to JSON"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "5ece644c-7098-449a-a46e-fc9b031e04b8",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "empty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "cbda8f44-0f10-4e2f-902d-7f01a5f10251",
+              "leftValue": "={{ $json.resend_count }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        912,
+        -432
+      ],
+      "id": "6921fab7-1d8e-4e0e-b4f5-25603361eb41",
+      "name": "New or Eligible?"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.redis_otp_key }}",
+        "options": {}
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        464,
+        -432
+      ],
+      "id": "02fba261-77a0-4f53-9cf4-3eaf42f81628",
+      "name": "Get OTP Value",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Redis Key').item.json.redis_otp_cooldown_key }}",
+        "expire": true,
+        "ttl": "={{ $('SubFlow Trigger').item.json.cooldown }}",
+        "setMode": "nx"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        -528
+      ],
+      "id": "0e8e8f75-794f-45f3-abe9-0dd7855ec849",
+      "name": "Set OTP Cooldown",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "657327c0-5204-469e-b4c2-571b500c9517",
+              "leftValue": "={{ $json.redis_result.success }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1360,
+        -528
+      ],
+      "id": "88f8c9ea-d59e-4e26-85c9-11aad9de9bbb",
+      "name": "On Cooldown?"
+    },
+    {
+      "parameters": {
+        "operation": "ttl",
+        "key": "={{ $('Redis Key').item.json.redis_otp_cooldown_key }}"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        1584,
+        -624
+      ],
+      "id": "9c1ee29b-99d9-4075-ab1d-3da2e95abb1c",
+      "name": "Get Cooldown Time",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_RESEND_COOLDOWN",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "=Please wait {{ $json.ttl }} seconds before sending a new OTP",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1808,
+        -624
+      ],
+      "id": "14f80782-9587-4311-95f7-0fd969d56185",
+      "name": "Return OTP on Cooldown"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_MAX_RESEND_REACHED",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "You've reached the max OTP resend count, please try again later",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1136,
+        -336
+      ],
+      "id": "8cecf367-1f51-442e-8d28-dafff8e35af5",
+      "name": "Return Max Resend Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const hex = $input.first().json.data;\nconst value = parseInt(hex, 16);\n\nconst otp = 100000 + (value % 900000);\n\nconst existing = $('Convert to JSON').first().json;\nconst isResend = Object.keys(existing).length > 0;\n\nreturn [{\n  json: {\n    otp,\n    mismatch_count: 0,\n    resend_count: isResend\n      ? Number(existing.resend_count ?? 0) + 1\n      : 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        -432
+      ],
+      "id": "6505e305-1a65-4014-a1fd-4b5fb451db9b",
+      "name": "Generate OTP"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Redis Key').item.json.redis_otp_key }}",
+        "value": "={\n  \"otp\": {{ $json.otp }},\n  \"mismatch_count\": {{ $json.mismatch_count }},\n  \"resend_count\": {{ $json.resend_count }}\n}",
+        "expire": true,
+        "ttl": "={{ $('SubFlow Trigger').item.json.TTL }}"
+      },
+      "type": "@vicenterusso/n8n-nodes-redis-enhanced.redisEnhanced",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        -432
+      ],
+      "id": "01da444d-beec-44d9-9f2a-3b516224c875",
+      "name": "Set OTP Value",
+      "credentials": {
+        "redis": {
+          "id": "7LhxKreZamTvXf7X",
+          "name": "local redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('SubFlow Trigger').item.json.email }}",
+        "subject": "Your One-Time Password (OTP)",
+        "emailType": "text",
+        "message": "=Hello,\n\nYour one-time verification code is:\n\n{{ $json.otp }}\n\nPlease enter this code to verify your session.\n\nFor your security, do not share this code with anyone.\n\nIf you did not request this code, you can safely ignore this email.\n\nThank you.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2256,
+        -432
+      ],
+      "id": "42d3f87c-429c-4009-98d2-6ecf6775ab8e",
+      "name": "Send OTP",
+      "webhookId": "0a4949c9-2982-465b-8d99-673dcede1934",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0EI4tJoANSuEBRrK",
+          "name": "jphilip.dev"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f7813c3-1f1d-4c89-91c2-fa34588120bb",
+              "name": "status",
+              "value": "OTP_SENT",
+              "type": "string"
+            },
+            {
+              "id": "4f641c8b-753c-41b9-9fd5-fcf083c384f2",
+              "name": "message",
+              "value": "=OTP has been sent successfully",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2480,
+        -432
+      ],
+      "id": "2ef2549c-844f-412f-9fc8-652f865ddf1f",
+      "name": "Return Sent Sucessfully"
+    },
+    {
+      "parameters": {
+        "content": "# Read Me\n\n### Purpose\nGenerates a six-digit OTP, stores it in Redis, and sends it to the user's email for session verification.\n\n### Workflow Inputs\n| Input | Description |\n|---|---|\n| `session_id` | Unique session identifier |\n| `email` | Recipient's email address |\n| `TTL` | OTP expiration time in seconds |\n| `cooldown` | Optional resend cooldown in seconds (default: 60) |\n\n### Workflow Process\n1. **Generate Redis Keys** – Creates separate keys for the OTP and resend cooldown using the session ID and email.\n2. **Retrieve Existing OTP** – Checks Redis for an existing OTP record and parses its data.\n3. **Check Resend Eligibility** – Allows a new OTP if none exists or the resend count is below the configured maximum (3).\n4. **Check Cooldown** – Uses Redis `SET NX` to prevent repeated OTP requests during the cooldown period.\n5. **Generate OTP** – Uses the Crypto node to generate cryptographically secure random hexadecimal data, converted into a six-digit OTP.\n6. **Store OTP** – Saves the OTP, mismatch counter, and resend counter in Redis with the configured expiration time.\n7. **Send Email** – Sends the OTP to the recipient's email address.\n8. **Return Result** – Returns the appropriate status and message.\n\n### Redis Data\n**OTP Key:**\n`otp:{session_id}:{email}`\n\nStores:\n- `otp` – Six-digit verification code\n- `mismatch_count` – Failed verification attempts\n- `resend_count` – Number of OTP resends\n\n**Cooldown Key:**\n`otp:cooldown:{session_id}:{email}`\n\nTemporarily prevents repeated OTP requests.\n\n### Possible Responses\n| Status | Description |\n|---|---|\n| `OTP_SENT` | OTP generated and sent successfully |\n| `OTP_RESEND_COOLDOWN` | User must wait before requesting another OTP |\n| `OTP_MAX_RESEND_REACHED` | Maximum resend limit reached |\n\n### Configuration\n- Maximum resends: 3\n- OTP expiration: Configurable through `TTL`",
+        "height": 1104,
+        "width": 976,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1024,
+        -736
+      ],
+      "id": "a20337eb-4bd0-499d-9263-c1e8102185b7",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "email"
+            },
+            {
+              "name": "TTL",
+              "type": "number"
+            },
+            {
+              "name": "cooldown",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        16,
+        -432
+      ],
+      "id": "8572593c-6b96-4b7e-9301-edf9d14f31b2",
+      "name": "SubFlow Trigger"
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "encodingType": "hex",
+        "stringLength": 8
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        -432
+      ],
+      "id": "14238ca3-8776-4458-9be7-0a49bfccb2b6",
+      "name": "Crypto"
+    }
+  ],
+  "pinData": {
+    "SubFlow Trigger": [
+      {
+        "json": {
+          "session_id": "427478ae-ae91-4df3-8a31-7eaded0b318b",
+          "email": "shirae43@gmail.com",
+          "TTL": 363,
+          "cooldown": 60
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Redis Key": {
+      "main": [
+        [
+          {
+            "node": "Get OTP Value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to JSON": {
+      "main": [
+        [
+          {
+            "node": "New or Eligible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New or Eligible?": {
+      "main": [
+        [
+          {
+            "node": "Set OTP Cooldown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Max Resend Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OTP Value": {
+      "main": [
+        [
+          {
+            "node": "Convert to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set OTP Cooldown": {
+      "main": [
+        [
+          {
+            "node": "On Cooldown?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Cooldown?": {
+      "main": [
+        [
+          {
+            "node": "Get Cooldown Time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crypto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Cooldown Time": {
+      "main": [
+        [
+          {
+            "node": "Return OTP on Cooldown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate OTP": {
+      "main": [
+        [
+          {
+            "node": "Set OTP Value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set OTP Value": {
+      "main": [
+        [
+          {
+            "node": "Send OTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send OTP": {
+      "main": [
+        [
+          {
+            "node": "Return Sent Sucessfully",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Sent Sucessfully": {
+      "main": [
+        []
+      ]
+    },
+    "SubFlow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Redis Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto": {
+      "main": [
+        [
+          {
+            "node": "Generate OTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "c67wTdeBo9PWUn2F",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "a31f8186-5979-473f-83e4-03e3c95ca8e4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1fbd8342f09182b49d85a9c75b180d46bc9cd7e7b9d41cfd6c15ba9b92aaf748"
+  },
+  "nodeGroups": [],
+  "id": "eVTECZ5eVKcg4G4p",
+  "tags": []
+}
