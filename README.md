@@ -2,6 +2,8 @@
 
 An AI-powered appointment assistant built with **n8n**. Customers can check availability and manage appointments through a web-based chat interface.
 
+**Live Demo:** [Try the AI Appointment Assistant](https://automationabc.com/agent/appointment-chat)
+
 ## Problem Statement
 
 Managing appointments manually requires businesses to repeatedly check calendars, respond to availability requests, verify customer details, and handle booking changes. These tasks can be time-consuming and increase the chance of scheduling mistakes.
